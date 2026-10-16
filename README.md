@@ -28,5 +28,5 @@ git clone https://github.com/s12171934/claude-usage-check.git ~/.claude/skills/c
 
 ## 구성과 공개 면
 
-- `SKILL.md` — 스킬 본문. 형식은 에이전트 도구가 정한다.
+- [[20_Agents/skills/claude-usage-check/SKILL|SKILL.md]] — 스킬 본문. 형식은 에이전트 도구가 정한다.
 - 공개 면은 스킬 이름(`claude-usage-check`)뿐이다. 다른 스킬은 이 이름으로만 이 스킬을 가리킨다.
