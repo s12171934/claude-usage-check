@@ -1,7 +1,7 @@
 ---
 title: claude-usage-check
 created: 2026-10-16
-updated: 2026-10-16
+updated: 2026-10-19
 tags: [domain/인공지능, area/ai에이전트, agent/claude-1b219bef-b3db-4ef6-8088-81f7f0d19120]
 source: ai
 ---
@@ -12,7 +12,7 @@ source: ai
 
 ## 하는 일
 
-- 1순위는 Claude Code 의 로컬 OAuth 토큰으로 사용량 API 를 부르는 경로다. 토큰은 셸 변수로만 다루고 출력하지 않는다.
+- 1순위는 `scripts/usage.py` 다. macOS 키체인의 Claude Code OAuth 토큰(없거나 만료면 `~/.claude/.credentials.json`)으로 사용량 API 를 부르고, 해석된 스냅숏을 기록하며 직전 대비 변화량을 낸다. 토큰은 출력하지 않는다.
 - 크레딧 단위(센트), 누적값 해석, 포화 조건, KST 변환, 사용량 급증 원인 분석까지 다룬다.
 
 ## 설치
@@ -29,4 +29,5 @@ git clone https://github.com/s12171934/claude-usage-check.git ~/.claude/skills/c
 ## 구성과 공개 면
 
 - [[20_Agents/skills/claude-usage-check/SKILL|SKILL.md]] — 스킬 본문. 형식은 에이전트 도구가 정한다.
+- `scripts/usage.py` — 조회·해석·스냅숏 기록 스크립트 (Python 3 표준 라이브러리만 쓴다).
 - 공개 면은 스킬 이름(`claude-usage-check`)뿐이다. 다른 스킬은 이 이름으로만 이 스킬을 가리킨다.

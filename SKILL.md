@@ -7,25 +7,33 @@ description: "Claude 구독의 초과 사용 크레딧(extra usage credits)과 �
 
 조회 자체는 두 줄이면 끝난다. 이 스킬의 실제 내용은 **어느 경로로 부를지**와 **숫자를 어떻게 읽을지**다.
 
-## 1. 조회 — 로컬 OAuth 토큰이 1순위
+## 1. 조회 — 스크립트가 1순위
 
 브라우저 로그인 상태와 무관하게 동작한다. Claude Code 가 설치돼 있으면 항상 이 경로를 먼저 쓴다.
+스크립트는 이 `SKILL.md` 가 있는 폴더의 `scripts/` 에 있다 — 로드된 경로의 심볼릭링크를 풀어 찾는다.
 
 ```bash
-CRED=/Users/<user>/.claude/.credentials.json   # $HOME 대신 절대경로 (아래 주의 참고)
-TOK=$(python3 -c "import json;print(json.load(open('$CRED'))['claudeAiOauth']['accessToken'])")
-curl -s https://api.anthropic.com/api/oauth/usage \
-  -H "Authorization: Bearer $TOK" \
-  -H "anthropic-beta: oauth-2025-04-20" \
-  -H "Content-Type: application/json"
+skill_file="<이 SKILL.md 가 로드된 경로>"
+skill_dir="$(cd "$(dirname "$(readlink -f "$skill_file")")" && pwd -P)"
+python3 "$skill_dir/scripts/usage.py"            # 조회 + 스냅숏 기록 + 직전 대비 변화량
+python3 "$skill_dir/scripts/usage.py" --no-save  # 기록 없이 확인만
+python3 "$skill_dir/scripts/usage.py" --raw      # 해석 전 응답 원문도 함께
 ```
 
-- **`$HOME`·`~` 를 쓰면 안 된다.** Aside 세션의 Bash 에서 `$HOME` 은 `/Users/<user>/.aside/runtime/home` 으로 리맵돼 `FileNotFoundError` 가 난다. 실제 홈 절대경로를 직접 적는다.
+출력은 JSON 하나다: 토큰 출처와 남은 수명, 해석된 스냅숏(달러 환산·KST 변환·`severity`·활성 버킷),
+직전 스냅숏 대비 변화량(`delta`), 기록 위치. §2 의 해석 규칙 중 기계적인 것은 스크립트가 이미 적용한다.
 
-- **토큰은 절대 출력하지 않는다.** 셸 변수로만 옮기고, 값을 로그·응답·요약 어디에도 싣지 않는다.
-- 토큰 수명은 약 1시간이고 Claude Code 가 자동 갱신한다. **매번 파일을 새로 읽는다** — 세션 변수에 캐시해 두면 다음 조회에서 401 이 난다. `claudeAiOauth.expiresAt`(epoch ms)로 남은 시간을 먼저 확인하면 만료 임박 여부를 미리 말해줄 수 있다.
+- **토큰은 macOS 키체인(`Claude Code-credentials`)이 정본이다.** Claude Code 는 키체인의 토큰을 갱신하고
+  `~/.claude/.credentials.json` 은 갱신하지 않을 수 있다(실측: 파일 토큰은 64시간 전 만료, 키체인은 유효).
+  스크립트는 키체인 → 파일 순으로 읽고 만료된 후보는 건너뛴다. 둘 다 만료면 Claude Code 를 한 번
+  실행해 갱신한 뒤 다시 부른다.
+- **토큰은 절대 출력하지 않는다.** 스크립트도 출처와 남은 분만 찍는다. 손으로 부를 때도 셸 변수로만 옮긴다.
+- **홈은 계정의 실제 홈으로 푼다.** Aside 세션의 Bash 는 `$HOME` 을 `~/.aside/runtime/home` 으로 리맵하므로
+  `$HOME`·`~` 를 쓰지 않는다 — 스크립트는 `pwd` 모듈로 실제 홈을 찾는다.
+- **연달아 부르지 않는다.** 짧은 간격으로 반복 호출하면 `429 rate_limit_error` 가 돌아온다. 한 번 부른 결과를 쓴다.
 - 계정·조직 확인이 필요하면 같은 토큰으로 `https://api.anthropic.com/api/oauth/profile`.
-- `~/.claude/.credentials.json` 은 Bash 로 읽힌다. 반면 볼트 경로 등 일부 절대경로는 Bash 가 거부하므로, 거부당하면 `read_file` 툴을 시도한다.
+- 스크립트를 쓸 수 없는 표면이면 같은 요청을 손으로 보낸다: `GET https://api.anthropic.com/api/oauth/usage`,
+  헤더 `Authorization: Bearer <token>`·`anthropic-beta: oauth-2025-04-20`.
 
 **2순위 — 브라우저 쿠키 경로.** 위가 막혔을 때만 쓴다.
 
@@ -54,7 +62,7 @@ const r = await fetch(`https://claude.ai/api/organizations/${orgUuid}/usage`);
 - **`is_active: true` 인 버킷이 현재 발목을 잡는 한도다.** 5시간 세션과 주간은 서로 독립적으로 움직이므로 둘 다 보고한다.
 - `weekly_scoped` 배열은 같은 날에도 비어서 돌아올 수 있다. 부재를 "해당 모델 사용량 0" 으로 읽지 않는다.
 - `resets_at` 은 UTC다. **항상 KST 로 변환해서 제시한다** (UTC+9).
-- `*_dollars` 필드들과 코드네임 버킷(`tangelo`, `nimbus_quill`, `cinder_cove` 등)은 대개 `null` 이다. 어느 하나가 non-null 로 바뀌면 새 한도 체계가 생겼다는 신호이므로 짚어준다.
+- `*_dollars` 필드들과 코드네임 버킷(`tangelo`, `nimbus_quill`, `cinder_cove` 등)은 대개 `null` 이다. 어느 하나가 non-null 로 바뀌면 새 한도 체계가 생겼다는 신호이므로 짚어준다. 스크립트 출력의 `unknown_nonnull_keys` 가 비어 있지 않으면 이 경우다.
 
 ## 3. 해석 — 크레딧이 도는 조건
 
@@ -70,12 +78,12 @@ const r = await fetch(`https://claude.ai/api/organizations/${orgUuid}/usage`);
 
 한국어로, 표 + 델타 우선.
 
-1. **직전 스냅숏 대비 변화량을 맨 앞에 놓는다.** 절대값만 주는 답은 이 사용자에게 불완전하다. 직전 기록은 에이전트의 메모리 저장소(세션 간에 남는 메모·노트)에서 찾는다.
-2. 두 스냅숏이 **같은 결제 주기**(월초 리셋 기준)에 속하는지 확인한 뒤에만 차이를 계산한다.
+1. **직전 스냅숏 대비 변화량을 맨 앞에 놓는다.** 절대값만 주는 답은 이 사용자에게 불완전하다. 스크립트의 `delta` 가 그 값이다.
+2. 두 스냅숏이 **같은 결제 주기**(월초 리셋 기준)에 속할 때만 크레딧 차이를 계산한다 — 스크립트는 KST 기준 달이 다르면 차이를 내지 않고 `note` 로 알린다.
 3. 표: 초과 크레딧 / 월 한도 / 5시간 세션 / 주간 전체 / 주간 scoped, 각 행에 현재값과 직전값.
 4. **측정 시각(KST)과 조회 경로를 명시한다.** 이 사용자는 결론의 출처를 되묻는다 — 실측인지 추정인지 항상 구분해서 적는다.
 5. 선형 외삽(주간 소진 예상 시점 등)은 **추정이라고 이름표를 붙여서** 제시한다.
-6. 조회 결과를 새 스냅숏으로 남긴다 — 타임스탬프가 붙은 이 기록만이 일별 지출의 유일한 출처다. 기록이 비면 며칠치 증가분을 어느 날에도 귀속시킬 수 없다.
+6. 조회 결과를 새 스냅숏으로 남긴다 — 타임스탬프가 붙은 이 기록만이 일별 지출의 유일한 출처다. 기록이 비면 며칠치 증가분을 어느 날에도 귀속시킬 수 없다. 기록 위치는 `$CLAUDE_USAGE_SNAPSHOTS`, 없으면 `<실제 홈>/.local/state/claude-usage-check/snapshots.jsonl` 한 곳이다 — 다른 곳(메모리·노트)에 따로 적지 않는다.
 
 ## 5. 사용량이 튀었을 때
 
